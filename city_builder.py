@@ -1,4 +1,6 @@
 import numpy as np
+from shapely.geometry import LineString, Point
+from itertools import combinations
 
 class CityBuilder:
     def __init__(self, seed, num_curves, scale):
@@ -51,6 +53,13 @@ class CityBuilder:
         self.next_street += 1
         return self.next_street
 
+    def quadratic_bezier(self, P0, P1, P2, num_points=100):
+        """Generate points along a quadratic Bézier curve."""
+        t_values = np.linspace(0, 1, num_points)
+        bezier_points = [( (1-t)**2 * P0[0] + 2*(1-t)*t * P1[0] + t**2 * P2[0],
+                           (1-t)**2 * P0[1] + 2*(1-t)*t * P1[1] + t**2 * P2[1] ) for t in t_values]
+        return bezier_points
+
 
     def build_bezier_streets(self):
         """Generate Bézier streets using circular points."""
@@ -83,7 +92,46 @@ class CityBuilder:
 
         return self.bezier_streets
 
+    def add_junctions(self):
+        """Find intersections of Bézier curves and add junctions."""
+        all_points = []
+        for street in self.bezier_streets:
+            P0 = (street["geometry"]["start"]["x"], street["geometry"]["start"]["y"])
+            P1 = (street["geometry"]["control"]["x"], street["geometry"]["control"]["y"])
+            P2 = (street["geometry"]["end"]["x"], street["geometry"]["end"]["y"])
+            curve_points = self.quadratic_bezier(P0, P1, P2, num_points=50)
+            all_points.append((street["id"], curve_points))
 
+        # Compare each street against every other for intersections
+        for (id1, points1), (id2, points2) in combinations(all_points, 2):
+            for p1, p2 in zip(points1[:-1], points1[1:]):
+                for q1, q2 in zip(points2[:-1], points2[1:]):
+                    intersection = self.line_intersection(p1, p2, q1, q2)
+                    if intersection:
+                        # Add junction data
+                        for street in self.bezier_streets:
+                            if street["id"] == id1 or street["id"] == id2:
+                                street["junctions"].append({"x": intersection[0], "y": intersection[1]})
+
+    def line_intersection(self, p1, p2, q1, q2):
+        """Find intersection of two line segments if they intersect."""
+        x1, y1 = p1
+        x2, y2 = p2
+        x3, y3 = q1
+        x4, y4 = q2
+        
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if denom == 0:
+            return None  # Parallel lines
+        
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+        u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / denom
+        
+        if 0 <= t <= 1 and 0 <= u <= 1:
+            return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))  # Intersection point
+        return None
+
+    
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -103,9 +151,11 @@ def quadratic_bezier(P0, P1, P2, num_points=50):
     return bezier_x, bezier_y
 
 
+import matplotlib.pyplot as plt
+
 def plot_city_from_dict(city_data, output_png="bezier_city.png"):
     """
-    Plots the Bézier city streets from a dictionary and saves it as a PNG.
+    Plots the Bézier city streets from a dictionary, including junctions, and saves it as a PNG.
 
     :param city_data: Dictionary containing street data.
     :param output_png: Filename for saving the PNG output.
@@ -126,9 +176,14 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
         bezier_x, bezier_y = quadratic_bezier(P0, P1, P2, num_points=100)
 
         # Plot the Bézier curve
-        plt.plot(bezier_x, bezier_y, linewidth=1, label=f"Street {street['id']}")
+        plt.plot(bezier_x, bezier_y, 'black', linewidth=1, label=f"Street {street['id']}")
 
-    plt.title("Bézier City Map")
+        # **Plot junctions (NEW)**
+        if "junctions" in street:
+            for junction in street["junctions"]:
+                plt.scatter(junction["x"], junction["y"], color='red', s=20, edgecolors='black', zorder=3)
+
+    plt.title("Bézier City Map with Junctions")
     plt.xlabel("X Coordinates")
     plt.ylabel("Y Coordinates")
     plt.legend(loc="upper right", fontsize="small", ncol=2, frameon=False)
@@ -140,8 +195,11 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
 
 
 
+
 # Example usage:
 city_builder = CityBuilder(seed=1024, num_curves=16, scale=1)  # Create city builder instance
-city_data = {"streets": city_builder.build_bezier_streets()}  # Generate Bézier streets
+city_builder.build_bezier_streets()
+city_builder.add_junctions()
 
+city_data = {"streets": city_builder.bezier_streets}  # Generate Bézier streets
 plot_city_from_dict(city_data)  # Plot from the dictionary
