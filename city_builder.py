@@ -96,7 +96,7 @@ class CityBuilder:
         return self.bezier_streets
 
     def add_junctions(self):
-        """Find intersections of Bézier curves and add junctions."""
+        """Find intersections of Bézier curves and add junctions, including connected street IDs."""
         all_points = []
         for street in self.bezier_streets:
             P0 = (street["geometry"]["start"]["x"], street["geometry"]["start"]["y"])
@@ -105,16 +105,28 @@ class CityBuilder:
             curve_points = self.quadratic_bezier(P0, P1, P2, num_points=50)
             all_points.append((street["id"], curve_points))
 
-        # Compare each street against every other for intersections
+        # Compare each pair of streets for intersections
         for (id1, points1), (id2, points2) in combinations(all_points, 2):
             for p1, p2 in zip(points1[:-1], points1[1:]):
                 for q1, q2 in zip(points2[:-1], points2[1:]):
                     intersection = self.line_intersection(p1, p2, q1, q2)
                     if intersection:
-                        # Add junction data
+                        x, y = intersection
+                        # Add to id1
                         for street in self.bezier_streets:
-                            if street["id"] == id1 or street["id"] == id2:
-                                street["junctions"].append({"x": intersection[0], "y": intersection[1]})
+                            if street["id"] == id1:
+                                street.setdefault("junctions", []).append({
+                                    "x": x,
+                                    "y": y,
+                                    "street_id": id2
+                                })
+                            elif street["id"] == id2:
+                                street.setdefault("junctions", []).append({
+                                    "x": x,
+                                    "y": y,
+                                    "street_id": id1
+                                })
+
 
     def line_intersection(self, p1, p2, q1, q2):
         """Find intersection of two line segments if they intersect."""
@@ -173,7 +185,8 @@ class CityBuilder:
                 street = {
                     "id": self.street_id(),
                     "type": "bresenham",
-                    "junctions": [],
+                    "junctions": [{"x": curve_points[k][0], "y": curve_points[k][1], "street_id": self.bezier_streets[i]["id"]},
+                                  {"x": prev_curve_points[k + offset][0], "y": prev_curve_points[k + offset][1], "street_id": self.bezier_streets[i - 1]["id"]}],
                     "geometry": {
                         "start": {"x": curve_points[k][0], "y": curve_points[k][1]},
                         "end": {"x": prev_curve_points[k + offset][0], "y": prev_curve_points[k + offset][1]}
@@ -184,7 +197,39 @@ class CityBuilder:
                 lines.append(street)
 
             self.cols.append(lines)
+
+
+    def add_bresenham_junctions(self):
+        """
+        Find intersections between bresenham-type streets and record junctions.
         
+        Adds a {"x", "y", "street_id"} dict to each bresenham street's 'junctions' list when it intersects another.
+        """
+
+        # Filter for bresenham streets only
+        bresenham_streets = [s for s in self.streets if s.get("type") == "bresenham"]
+
+        for i, from_street in enumerate(bresenham_streets):
+            for j, to_street in enumerate(bresenham_streets):
+                if from_street["id"] == to_street["id"]:
+                    continue  # skip self
+
+                # Extract segment endpoints
+                x1, y1 = from_street["geometry"]["start"]["x"], from_street["geometry"]["start"]["y"]
+                x2, y2 = from_street["geometry"]["end"]["x"], from_street["geometry"]["end"]["y"]
+                x3, y3 = to_street["geometry"]["start"]["x"], to_street["geometry"]["start"]["y"]
+                x4, y4 = to_street["geometry"]["end"]["x"], to_street["geometry"]["end"]["y"]
+
+                intersection = self.line_intersection((x1, y1), (x2, y2), (x3, y3), (x4, y4))
+                if intersection:
+                    x, y = intersection
+                    from_street.setdefault("junctions", []).append({
+                        "x": x,
+                        "y": y,
+                        "street_id": to_street["id"]
+                    })
+
+
     
 import numpy as np
 import matplotlib.pyplot as plt
@@ -205,7 +250,6 @@ def quadratic_bezier(P0, P1, P2, num_points=50):
     return bezier_x, bezier_y
 
 
-import matplotlib.pyplot as plt
 
 def plot_city_from_dict(city_data, output_png="bezier_city.png"):
     """
@@ -254,8 +298,8 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
 city_builder = CityBuilder(seed=1024, num_curves=16, scale=1)  # Create city builder instance
 city_builder.build_bezier_streets()
 city_builder.build_diagonal_streets()
-
 city_builder.add_junctions()
+city_builder.add_bresenham_junctions()
 
 city_data = {"streets": city_builder.streets}
 plot_city_from_dict(city_data)  # Plot from the dictionary
