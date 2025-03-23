@@ -13,6 +13,9 @@ class CityBuilder:
         self.curve_num_points = self.seed
         self.verbose = False
         self.bezier_streets = []
+        self.bresham_streets = []
+        self.cols = []
+        self.lines = []
 
         # Generate LCG sequence and sort it
         self.bezier_sequence = sorted(self.lcg_sequence(self.magic, self.magic, 0, self.magic)[:num_curves])
@@ -131,6 +134,57 @@ class CityBuilder:
             return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))  # Intersection point
         return None
 
+###############################################################################
+
+    def build_diagonal_streets(self):
+        self.diagonal_streets = []
+        self.cols = []
+        self.streets = self.bezier_streets.copy()  # Start with the existing Bézier streets
+
+        for i in range(1, self.num_curves):
+            lines = []
+            # #MAGIC: j ranges from 0 to curve_num_points - 100 in steps of 50
+            for j in range(0, self.curve_num_points - 100, 50):
+                k = j
+                offset = 100  # static for now, as per original JS
+
+                # Generate points along both Bézier curves
+                curr = self.bezier_streets[i]["geometry"]
+                prev = self.bezier_streets[i - 1]["geometry"]
+
+                curve_points = self.quadratic_bezier(
+                    (curr["start"]["x"], curr["start"]["y"]),
+                    (curr["control"]["x"], curr["control"]["y"]),
+                    (curr["end"]["x"], curr["end"]["y"]),
+                    num_points=self.curve_num_points
+                )
+
+                prev_curve_points = self.quadratic_bezier(
+                    (prev["start"]["x"], prev["start"]["y"]),
+                    (prev["control"]["x"], prev["control"]["y"]),
+                    (prev["end"]["x"], prev["end"]["y"]),
+                    num_points=self.curve_num_points
+                )
+
+                # Safeguard: avoid going out of bounds
+                if k + offset >= len(prev_curve_points):
+                    continue
+
+                street = {
+                    "id": self.street_id(),
+                    "type": "bresenham",
+                    "junctions": [],
+                    "geometry": {
+                        "start": {"x": curve_points[k][0], "y": curve_points[k][1]},
+                        "end": {"x": prev_curve_points[k + offset][0], "y": prev_curve_points[k + offset][1]}
+                    }
+                }
+                self.streets.append(street)
+                self.diagonal_streets.append(street)
+                lines.append(street)
+
+            self.cols.append(lines)
+        
     
 import numpy as np
 import matplotlib.pyplot as plt
@@ -155,7 +209,7 @@ import matplotlib.pyplot as plt
 
 def plot_city_from_dict(city_data, output_png="bezier_city.png"):
     """
-    Plots the Bézier city streets from a dictionary, including junctions, and saves it as a PNG.
+    Plots the Bézier and diagonal city streets from a dictionary, including junctions, and saves it as a PNG.
 
     :param city_data: Dictionary containing street data.
     :param output_png: Filename for saving the PNG output.
@@ -163,33 +217,33 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
 
     plt.figure(figsize=(10, 10))
 
-    # Plot each Bézier street
     for street in city_data["streets"]:
-        geometry = street["geometry"]  # This is a dictionary with start, control, end points
+        geometry = street["geometry"]
+        street_type = street.get("type", "bezier")
+        if street_type == "bezier":
+            # Extract Bézier control points
+            P0 = (geometry["start"]["x"], geometry["start"]["y"])
+            P1 = (geometry["control"]["x"], geometry["control"]["y"])
+            P2 = (geometry["end"]["x"], geometry["end"]["y"])
 
-        # Extract start, control, and end points
-        P0 = (geometry["start"]["x"], geometry["start"]["y"])
-        P1 = (geometry["control"]["x"], geometry["control"]["y"])
-        P2 = (geometry["end"]["x"], geometry["end"]["y"])
+            bezier_x, bezier_y = quadratic_bezier(P0, P1, P2, num_points=100)
+            plt.plot(bezier_x, bezier_y, 'black', linewidth=1)
 
-        # Generate Bézier curve points
-        bezier_x, bezier_y = quadratic_bezier(P0, P1, P2, num_points=100)
-
-        # Plot the Bézier curve
-        plt.plot(bezier_x, bezier_y, 'black', linewidth=1, label=f"Street {street['id']}")
-
-        # **Plot junctions (NEW)**
+        elif street_type == "bresenham":
+            # Draw straight lines for diagonal streets
+            x = [geometry["start"]["x"], geometry["end"]["x"]]
+            y = [geometry["start"]["y"], geometry["end"]["y"]]
+            plt.plot(x, y, 'blue', linestyle='--', linewidth=0.8)
+ 
+        # Plot junctions
         if "junctions" in street:
             for junction in street["junctions"]:
                 plt.scatter(junction["x"], junction["y"], color='red', s=20, edgecolors='black', zorder=3)
 
-    plt.title("Bézier City Map with Junctions")
+    plt.title("Bézier City Map with Diagonal Streets and Junctions")
     plt.xlabel("X Coordinates")
     plt.ylabel("Y Coordinates")
-    plt.legend(loc="upper right", fontsize="small", ncol=2, frameon=False)
     plt.grid(True, linestyle="--", linewidth=0.5)
-
-    # Save and show the plot
     plt.savefig(output_png, dpi=300)
     plt.show()
 
@@ -199,7 +253,12 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
 # Example usage:
 city_builder = CityBuilder(seed=1024, num_curves=16, scale=1)  # Create city builder instance
 city_builder.build_bezier_streets()
+city_builder.build_diagonal_streets()
+
 city_builder.add_junctions()
 
-city_data = {"streets": city_builder.bezier_streets}  # Generate Bézier streets
+city_data = {"streets": city_builder.streets}
 plot_city_from_dict(city_data)  # Plot from the dictionary
+
+from json import dumps
+open ("bezier_city.json", "w").write(dumps(city_data))
