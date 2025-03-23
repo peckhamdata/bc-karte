@@ -10,11 +10,13 @@ If you haven't already:
 
 ```bash
 poetry install
+```
 
 ## Generate the map with
 
 ```bash
 poetry run python city_builder.py
+```
 
 This will:
 
