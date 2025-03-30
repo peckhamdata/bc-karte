@@ -1,6 +1,17 @@
 import numpy as np
 from shapely.geometry import LineString, Point
 from itertools import combinations
+from scipy.spatial import KDTree
+
+
+def qb(P0, P1, P2, num_points=100):
+    """Generate points along a quadratic Bézier curve."""
+    t_values = np.linspace(0, 1, num_points)
+    bezier_points = np.column_stack([
+        (1 - t_values) ** 2 * P0[0] + 2 * (1 - t_values) * t_values * P1[0] + t_values ** 2 * P2[0],
+        (1 - t_values) ** 2 * P0[1] + 2 * (1 - t_values) * t_values * P1[1] + t_values ** 2 * P2[1],
+    ])
+    return bezier_points  # shape: (num_points, 2)
 
 class CityBuilder:
     def __init__(self, seed, num_curves, scale):
@@ -229,8 +240,95 @@ class CityBuilder:
                         "street_id": to_street["id"]
                     })
 
+###############################################################################
 
-    
+    def sync_bresenham_junctions_to_beziers(self):
+        """
+        Ensure all Bézier streets are aware of junctions with Bresenham (diagonal) streets.
+        """
+        # Build a quick lookup of streets by ID
+        street_lookup = {street["id"]: street for street in self.bezier_streets + self.streets}
+
+        for street in self.streets:
+            if street["type"] != "bresenham":
+                continue  # Only care about diagonal connections here
+
+            for junction in street.get("junctions", []):
+                target_id = junction["street_id"]
+                if target_id not in street_lookup:
+                    continue
+
+                target_street = street_lookup[target_id]
+                # Check if this junction already exists in the target
+                exists = any(
+                    abs(j["x"] - junction["x"]) < 1e-6 and
+                    abs(j["y"] - junction["y"]) < 1e-6 and
+                    j.get("street_id") == street["id"]
+                    for j in target_street.get("junctions", [])
+                )
+
+                if not exists:
+                    if "junctions" not in target_street:
+                        target_street["junctions"] = []
+                    target_street["junctions"].append({
+                        "x": junction["x"],
+                        "y": junction["y"],
+                        "street_id": street["id"]
+                    })
+
+###############################################################################
+
+    def sort_junctions_along_streets(self):
+        """Sort junctions along each street from start to end based on Euclidean distance."""
+        for street in self.streets:
+            if street["type"] != "bezier":
+                start_x = street["geometry"]["start"]["x"]
+                start_y = street["geometry"]["start"]["y"]
+
+                def distance(junction):
+                    dx = junction["x"] - start_x
+                    dy = junction["y"] - start_y
+                    return dx * dx + dy * dy  # no need for sqrt, sorting only
+
+                street["junctions"].sort(key=distance)
+
+
+    def sort_junctions_along_bezier(self):
+
+        for street in self.streets:
+            if street["type"] == "bezier":
+                P0 = np.array([street["geometry"]["start"]["x"], street["geometry"]["start"]["y"]])
+                P1 = np.array([street["geometry"]["control"]["x"], street["geometry"]["control"]["y"]])
+                P2 = np.array([street["geometry"]["end"]["x"], street["geometry"]["end"]["y"]])
+
+                # Generate sampled points along the curve
+                bezier_points = np.array(qb(P0, P1, P2,))
+                # Build a KDTree for fast nearest-neighbor lookup
+                try:
+                    tree = KDTree(bezier_points)
+                except ValueError as e:
+                    print(f"KDTree error: {e}")
+                    continue
+
+                # Find closest index for each junction
+                indexed_junctions = []
+                for j in street["junctions"]:
+                    try:
+                        point = np.array([j['x'], j['y']]).reshape(1, -1)
+                        dist, idx = tree.query(point)
+                        indexed_junctions.append((j, idx[0]))
+                    except Exception as e:
+                        print(f"Error querying KDTree: {e}")
+                        print(j)
+                        print(tree)
+                        import pdb; pdb.set_trace()
+                # Sort junctions by their index along the curve
+                sorted_junctions = [j for j, _ in sorted(indexed_junctions, key=lambda tup: tup[1])]
+                street["junctions"] = sorted_junctions
+
+
+###############################################################################
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -284,6 +382,7 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
             for junction in street["junctions"]:
                 plt.scatter(junction["x"], junction["y"], color='red', s=20, edgecolors='black', zorder=3)
 
+
     plt.title("Bézier City Map with Diagonal Streets and Junctions")
     plt.xlabel("X Coordinates")
     plt.ylabel("Y Coordinates")
@@ -294,15 +393,20 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
 
 
 
+
+
 # Example usage:
 city_builder = CityBuilder(seed=1024, num_curves=16, scale=1)  # Create city builder instance
 city_builder.build_bezier_streets()
 city_builder.build_diagonal_streets()
 city_builder.add_junctions()
 city_builder.add_bresenham_junctions()
+city_builder.sync_bresenham_junctions_to_beziers()
+city_builder.sort_junctions_along_streets()
+city_builder.sort_junctions_along_bezier()
 
 city_data = {"streets": city_builder.streets}
-plot_city_from_dict(city_data)  # Plot from the dictionary
 
 from json import dumps
 open ("bezier_city.json", "w").write(dumps(city_data))
+# plot_city_from_dict(city_data, output_png="bezier_city.png")
