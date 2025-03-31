@@ -3,22 +3,50 @@
 <head>
   <title>Bézier City – Walk Explorer</title>
   <style>
-    body { margin: 0; font-family: sans-serif; }
-    canvas { background: #fff; display: block; margin: auto; }
-    #walkBtn { position: absolute; top: 10px; left: 10px; padding: 8px 12px; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      width: 100%;
+      font-family: sans-serif;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(255,255,255,0.8);
+      padding: 6px;
+      border-radius: 4px;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
   </style>
-</head>
+  </head>
 <body>
-  <button id="walkBtn">Take a Random Walk</button>
-  <canvas id="cityCanvas" width="1200" height="1200"></canvas>
+  <div id="controls">
+    <button id="walkBtn">Take a Random Walk</button>
+    <button id="multiBtn">Take Multiple Walks</button>
+  </div>
+  <canvas id="cityCanvas"></canvas>
 
   <script>
     const canvas = document.getElementById("cityCanvas");
     const ctx = canvas.getContext("2d");
     const walkBtn = document.getElementById("walkBtn");
+    const multiBtn = document.getElementById("multiBtn");
 
     let city = null;
     let scale = 1, offsetX = 0, offsetY = 0;
+
+    const walkColors = [
+      "dodgerblue", "crimson", "mediumseagreen", "goldenrod", "orchid",
+      "darkorange", "deepskyblue", "firebrick", "limegreen", "mediumpurple"
+    ];
 
     function drawCity() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -36,8 +64,8 @@
       }
     }
 
-    function drawWalk(edgeList) {
-      ctx.strokeStyle = "dodgerblue";
+    function drawWalk(edgeList, color = "dodgerblue") {
+      ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       for (const edge of edgeList) {
         ctx.beginPath();
@@ -66,23 +94,46 @@
         walked.push(edge);
         visited.add(eid);
 
-        // Move to next junction
         const ends = edge.coords;
         const nextCoord = ends.find(pt => pt[0] !== current.coords[0] || pt[1] !== current.coords[1]);
         current = junctions.find(j => j.coords[0] === nextCoord[0] && j.coords[1] === nextCoord[1]);
         if (!current) break;
       }
 
-      drawCity();
-      drawWalk(walked);
+      return walked;
+    }
+
+    function takeMultipleWalks(count = 5) {
+      for (let i = 0; i < count; i++) {
+        const walk = takeRandomWalk(25);
+        const color = walkColors[i % walkColors.length];
+        drawWalk(walk, color);
+      }
     }
 
     fetch("bezier_city_web.json")
       .then(res => res.json())
       .then(data => {
         city = data;
+        resizeCanvasAndFitCity();
+    });
 
-        // Fit to canvas
+    walkBtn.addEventListener("click", () => {
+      drawCity();
+      drawWalk(takeRandomWalk(27));
+    });
+
+    multiBtn.addEventListener("click", () => {
+      takeMultipleWalks(39); // You can increase or make dynamic
+    });
+
+    function resizeCanvasAndFitCity() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        if (!city) return;
+
+        // Fit city to canvas
         const allX = city.edges.flatMap(e => e.coords.map(pt => pt[0]));
         const allY = city.edges.flatMap(e => e.coords.map(pt => pt[1]));
         const minX = Math.min(...allX);
@@ -98,9 +149,12 @@
         offsetY = (canvas.height - h * scale) / 2 - minY * scale;
 
         drawCity();
-      });
+    }
 
-    walkBtn.addEventListener("click", () => takeRandomWalk(25));
+    // Call on load + resize
+    window.addEventListener("resize", resizeCanvasAndFitCity);
+
+
   </script>
 </body>
 </html>
