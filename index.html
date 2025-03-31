@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bézier City – Walk Explorer</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    canvas { background: #fff; display: block; margin: auto; }
+    #walkBtn { position: absolute; top: 10px; left: 10px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <button id="walkBtn">Take a Random Walk</button>
+  <canvas id="cityCanvas" width="1200" height="1200"></canvas>
+
+  <script>
+    const canvas = document.getElementById("cityCanvas");
+    const ctx = canvas.getContext("2d");
+    const walkBtn = document.getElementById("walkBtn");
+
+    let city = null;
+    let scale = 1, offsetX = 0, offsetY = 0;
+
+    function drawCity() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "#ccc";
+      ctx.lineWidth = 1;
+
+      for (const edge of city.edges) {
+        ctx.beginPath();
+        const [start, ...rest] = edge.coords;
+        ctx.moveTo(start[0] * scale + offsetX, start[1] * scale + offsetY);
+        for (const pt of rest) {
+          ctx.lineTo(pt[0] * scale + offsetX, pt[1] * scale + offsetY);
+        }
+        ctx.stroke();
+      }
+    }
+
+    function drawWalk(edgeList) {
+      ctx.strokeStyle = "dodgerblue";
+      ctx.lineWidth = 2;
+      for (const edge of edgeList) {
+        ctx.beginPath();
+        const [start, ...rest] = edge.coords;
+        ctx.moveTo(start[0] * scale + offsetX, start[1] * scale + offsetY);
+        for (const pt of rest) {
+          ctx.lineTo(pt[0] * scale + offsetX, pt[1] * scale + offsetY);
+        }
+        ctx.stroke();
+      }
+    }
+
+    function takeRandomWalk(steps = 20) {
+      const junctions = city.junctions;
+      const edges = city.edges;
+
+      let current = junctions[Math.floor(Math.random() * junctions.length)];
+      const walked = [];
+      const visited = new Set();
+
+      for (let i = 0; i < steps; i++) {
+        const options = current.edge_ids.filter(eid => !visited.has(eid));
+        if (options.length === 0) break;
+        const eid = options[Math.floor(Math.random() * options.length)];
+        const edge = edges.find(e => e.id === eid);
+        walked.push(edge);
+        visited.add(eid);
+
+        // Move to next junction
+        const ends = edge.coords;
+        const nextCoord = ends.find(pt => pt[0] !== current.coords[0] || pt[1] !== current.coords[1]);
+        current = junctions.find(j => j.coords[0] === nextCoord[0] && j.coords[1] === nextCoord[1]);
+        if (!current) break;
+      }
+
+      drawCity();
+      drawWalk(walked);
+    }
+
+    fetch("bezier_city_web.json")
+      .then(res => res.json())
+      .then(data => {
+        city = data;
+
+        // Fit to canvas
+        const allX = city.edges.flatMap(e => e.coords.map(pt => pt[0]));
+        const allY = city.edges.flatMap(e => e.coords.map(pt => pt[1]));
+        const minX = Math.min(...allX);
+        const maxX = Math.max(...allX);
+        const minY = Math.min(...allY);
+        const maxY = Math.max(...allY);
+
+        const margin = 40;
+        const w = maxX - minX;
+        const h = maxY - minY;
+        scale = Math.min((canvas.width - margin) / w, (canvas.height - margin) / h);
+        offsetX = (canvas.width - w * scale) / 2 - minX * scale;
+        offsetY = (canvas.height - h * scale) / 2 - minY * scale;
+
+        drawCity();
+      });
+
+    walkBtn.addEventListener("click", () => takeRandomWalk(25));
+  </script>
+</body>
+</html>

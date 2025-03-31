@@ -1,4 +1,4 @@
-from json import load
+from json import load, dump
 from shapely.geometry import LineString, Polygon
 
 def load_city_model(filepath):
@@ -98,16 +98,29 @@ def plot_walked_edges(edges, ax=None, color="dodgerblue", title="Walk View"):
     plt.show()
 
 
+def export_for_web(city_model, out_path="bezier_city_web.json"):
+    def to_coords(g): return list(g.coords)
+
+    web_model = {
+        "edges": [
+            {
+                "id": edge["id"],
+                "coords": to_coords(edge["geometry"])
+            }
+            for edge in city_model["edges"]
+        ],
+        "junctions": [
+            {
+                "id": j["id"],
+                "coords": j["coords"],
+                "edge_ids": j["edge_ids"]
+            }
+            for j in city_model["junctions"]
+        ]
+    }
+
+    with open(out_path, "w") as f:
+        dump(web_model, f)
+
 city_model = load_city_model("bezier_city_model.json")
-
-# Pick a block
-walked = walk_blocks(city_model, block_ids=[0])
-plot_walked_edges(walked, title="Block Walk")
-
-# Or pick a street
-walked = walk_street(city_model, street_id=1)
-plot_walked_edges(walked, title="Street 17")
-
-# Or take a meandering journey
-walked = walk_random_junctions(city_model, steps=25)
-plot_walked_edges(walked, title="Random Junction Walk")
+export_for_web(city_model, "bezier_city_web.json")
