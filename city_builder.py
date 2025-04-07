@@ -391,10 +391,6 @@ def plot_city_from_dict(city_data, output_png="bezier_city.png"):
     plt.show()
 
 
-
-
-
-
 # Example usage:
 city_builder = CityBuilder(seed=1024, num_curves=16, scale=1)  # Create city builder instance
 city_builder.build_bezier_streets()
@@ -409,4 +405,4 @@ city_data = {"streets": city_builder.streets}
 
 from json import dumps
 open ("bezier_city.json", "w").write(dumps(city_data))
-# plot_city_from_dict(city_data, output_png="bezier_city.png")
+plot_city_from_dict(city_data, output_png="bezier_city.png")

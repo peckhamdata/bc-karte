@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "bc-karte"
+version = "0.1.0"
+description = ""
+authors = ["chris-young-12-nhs <chris.young12@nhs.net>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+shapely = "^2.0.7"
+matplotlib = "^3.10.1"
+networkx = "^3.4.2"
+scipy = "^1.15.2"
+uvicorn = "^0.34.0"
+pydantic = "^2.11.2"
+fastapi = "^0.115.12"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

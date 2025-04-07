@@ -68,14 +68,80 @@ def split_polygon_into_voronoi(poly, num_points):
                     cells.append(clipped_cell)
     return cells
 
-# Function to apply subdivision
-def subdivide_blocks(blocks, method='rectangles', **kwargs):
+
+def bsp_split(poly, depth=3):
+    """Recursively split a polygon using Binary Space Partitioning (BSP)."""
+    if depth == 0:
+        return [poly]
+
+    minx, miny, maxx, maxy = poly.bounds
+    if random.random() > 0.5:  # Randomly choose to split vertically or horizontally
+        split_x = random.uniform(minx + 0.3 * (maxx - minx), maxx - 0.3 * (maxx - minx))
+        left = box(minx, miny, split_x, maxy)
+        right = box(split_x, miny, maxx, maxy)
+        parts = (left, right)
+    else:  # Horizontal split
+        split_y = random.uniform(miny + 0.3 * (maxy - miny), maxy - 0.3 * (maxy - miny))
+        bottom = box(minx, miny, maxx, split_y)
+        top = box(minx, split_y, maxx, maxy)
+        parts = (bottom, top)
+
+    # Recursively split each part
+    result = []
+    for part in parts:
+        clipped = poly.intersection(part)
+        if not clipped.is_empty:
+            result.extend(bsp_split(clipped, depth - 1))
+    return result
+
+import math
+
+def create_hex_grid(poly, hex_size):
+    """Create a hexagonal grid clipped to a polygon."""
+    minx, miny, maxx, maxy = poly.bounds
+    dx = 3/2 * hex_size
+    dy = math.sqrt(3) * hex_size
+    
+    cells = []
+    
+    x = minx
+    while x < maxx + hex_size:
+        y = miny
+        while y < maxy + hex_size:
+            # Offset every other column ("odd-r" layout)
+            offset = 0 if int((x - minx) / dx) % 2 == 0 else dy / 2
+            
+            hex_center = (x, y + offset)
+            hexagon = create_hexagon(hex_center, hex_size)
+            clipped = poly.intersection(hexagon)
+            if not clipped.is_empty:
+                cells.append(clipped)
+            y += dy
+        x += dx
+    
+    return cells
+
+def create_hexagon(center, size):
+    """Create a regular hexagon polygon centered at a point."""
+    cx, cy = center
+    angles = [math.radians(a) for a in range(0, 360, 60)]
+    points = [(cx + size * math.cos(a), cy + size * math.sin(a)) for a in angles]
+    return Polygon(points)
+
+# At top of function (initialize a global cell counter)
+cell_counter = 0
+
+def subdivide_blocks(blocks, use_methods, **kwargs):
+    global cell_counter  # <- allow modification
     for idx, block in enumerate(blocks):
         coords = block['polygon']
         poly = Polygon(coords)
         if not poly.is_valid:
             poly = poly.buffer(0)
 
+        methods = ['rectangles', 'voronoi', 'bsp', 'hex']
+        method = methods[use_methods[idx] - 1]
+        print(f"Using method {method} for block {idx}")
         if method == 'rectangles':
             rows = kwargs.get('rows')[idx]
             cols = kwargs.get('cols')[idx]
@@ -83,17 +149,85 @@ def subdivide_blocks(blocks, method='rectangles', **kwargs):
         elif method == 'voronoi':
             num_points = kwargs.get('num_points', 10)
             cells = split_polygon_into_voronoi(poly, num_points)
+        elif method == 'bsp':
+            depth = kwargs.get('depth', 3)
+            cells = bsp_split(poly, depth)
+        elif method == 'hex':
+            hex_size = kwargs.get('hex_size', 20)
+            cells = create_hex_grid(poly, hex_size)
         else:
             raise ValueError(f"Unknown subdivision method: {method}")
 
-        # Save cells as lists of points
+        # Save cells as list of dicts with id, coords, edge_ids
         block['cells'] = []
         for cell in cells:
             if isinstance(cell, Polygon):
-                block['cells'].append(list(cell.exterior.coords))
+                cell_coords = list(cell.exterior.coords)
             elif isinstance(cell, MultiPolygon):
+                # If it's multipolygon, flatten it into separate cells
                 for subcell in cell.geoms:
-                    block['cells'].append(list(subcell.exterior.coords))
+                    cell_coords = list(subcell.exterior.coords)
+                    block['cells'].append({
+                        'id': cell_counter,
+                        'coords': cell_coords,
+                        'edge_ids': []
+                    })
+                    print(f"Creating cell {cell_counter}")
+                    cell_counter += 1
+                continue  # Skip adding again below
+            else:
+                continue  # Unexpected type, skip
+
+            block['cells'].append({
+                'id': cell_counter,
+                'coords': cell_coords,
+                'edge_ids': []
+            })
+            cell_counter += 1
+
+
+from shapely.geometry import Polygon, LineString
+
+def associate_edges_to_cells(blocks):
+    """For each block, associate block edge IDs to any cells touching the block boundary."""
+    for block in blocks:
+        coords = block['polygon']
+        edge_ids = block.get('edge_ids', [])
+        block_edges = []
+
+        # Build LineStrings for each block edge
+        for i in range(len(coords) - 1):
+            p1 = coords[i]
+            p2 = coords[i+1]
+            eid = edge_ids[i] if i < len(edge_ids) else None
+            block_edges.append((LineString([p1, p2]), eid))
+
+        new_cells = []
+        for cell in block.get('cells', []):
+            # Depending on your data, a cell might already be a dict or just coords
+            if isinstance(cell, dict):
+                cell_coords = cell['coords']
+            else:
+                cell_coords = cell
+
+            cell_poly = Polygon(cell_coords)
+            associated_edge_ids = []
+
+            for edge_line, edge_id in block_edges:
+                if edge_id is not None and cell_poly.touches(edge_line):
+                    associated_edge_ids.append(edge_id)
+
+            # Build new cell record
+            new_cell = {
+                'coords': cell_coords,
+                'edge_ids': associated_edge_ids,
+                'id': cell['id']
+            }
+            new_cells.append(new_cell)
+
+        # Replace the cells with enriched cells
+        block['cells'] = new_cells
+
 
 def lcg_sequence(seed, max_val, min_val, length):
     """Linear Congruential Generator (LCG) sequence generator."""
@@ -113,11 +247,20 @@ def lcg_sequence(seed, max_val, min_val, length):
 
 # Subdivide blocks
 
-import pdb; pdb.set_trace()
 num_rows = lcg_sequence(39,1,15,len(blocks))
 num_cols = lcg_sequence(27,1,15,len(blocks))
+use_methods  = lcg_sequence(39,0,4,len(blocks))
 
-subdivide_blocks(blocks, method='rectangles', rows=num_rows, cols=num_cols)  # Change to 'voronoi' if you want
+subdivide_blocks(blocks, use_methods, hex_size=5, rows=num_rows, cols=num_cols)
+
+associate_edges_to_cells(blocks)
+
+filename = 'bezier_city_full.json'
+with open(filename, 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Saved updated blocks to {filename}!")
+
 
 import random
 
@@ -141,7 +284,8 @@ def random_neon_color():
 fig, ax = plt.subplots(figsize=(10, 10))
 
 for block in blocks:
-    for cell_coords in block.get('cells', []):
+    for cells in block.get('cells', []):
+        cell_coords = cells['coords']
         patch = plt.Polygon(
             cell_coords, 
             facecolor=random_neon_color(),  # ← neon magic here
@@ -150,22 +294,31 @@ for block in blocks:
             alpha=0.8
         )
         ax.add_patch(patch)
-    
+
+    for street in block.get('cells', []):
+        if isinstance(street, list):  # Usual polygon
+            patch = plt.Polygon(street, alpha=0.5, edgecolor='black')
+            ax.add_patch(patch)
+        elif isinstance(street, LineString):  # L-system street
+            x, y = street.xy
+            ax.plot(x, y, color='cyan', linewidth=1)
+
     # Draw the block boundary too
     poly = Polygon(block['polygon'])
     if isinstance(poly, Polygon):
         x, y = poly.exterior.xy
-        ax.plot(x, y, color='white', linewidth=1.5)
+        ax.plot(x, y, color='blue', linewidth=1.5)
     elif isinstance(poly, MultiPolygon):
         for single_poly in poly.geoms:
             x, y = single_poly.exterior.xy
-            ax.plot(x, y, color='white', linewidth=1.5)
+            ax.plot(x, y, color='#08F7FE', linewidth=1.5)
 
 # Dynamic limits
 all_x = []
 all_y = []
 for block in blocks:
-    for cell_coords in block.get('cells', []):
+    for cells in block.get('cells', []):
+        cell_coords = cells['coords']
         for x, y in cell_coords:
             all_x.append(x)
             all_y.append(y)

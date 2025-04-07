@@ -1,160 +1,18 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Bézier City – Walk Explorer</title>
+  <meta charset="UTF-8">
+  <title>Bezier City Viewer</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      height: 100%;
-      width: 100%;
-      font-family: sans-serif;
-    }
-    #controls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 10;
-      background: rgba(255,255,255,0.8);
-      padding: 6px;
-      border-radius: 4px;
-    }
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-    }
+    body { margin: 0; background: black; }
+    canvas { display: block; margin: 0 auto; background: black; }
   </style>
-  </head>
+</head>
 <body>
-  <div id="controls">
-    <button id="walkBtn">Take a Random Walk</button>
-    <button id="multiBtn">Take Multiple Walks</button>
-  </div>
-  <canvas id="cityCanvas"></canvas>
+  <canvas id="cityCanvas" width="2000" height="2000"></canvas>
 
-  <script>
-    const canvas = document.getElementById("cityCanvas");
-    const ctx = canvas.getContext("2d");
-    const walkBtn = document.getElementById("walkBtn");
-    const multiBtn = document.getElementById("multiBtn");
-
-    let city = null;
-    let scale = 1, offsetX = 0, offsetY = 0;
-
-    const walkColors = [
-      "dodgerblue", "crimson", "mediumseagreen", "goldenrod", "orchid",
-      "darkorange", "deepskyblue", "firebrick", "limegreen", "mediumpurple"
-    ];
-
-    function drawCity() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = "#ccc";
-      ctx.lineWidth = 1;
-
-      for (const edge of city.edges) {
-        ctx.beginPath();
-        const [start, ...rest] = edge.coords;
-        ctx.moveTo(start[0] * scale + offsetX, start[1] * scale + offsetY);
-        for (const pt of rest) {
-          ctx.lineTo(pt[0] * scale + offsetX, pt[1] * scale + offsetY);
-        }
-        ctx.stroke();
-      }
-    }
-
-    function drawWalk(edgeList, color = "dodgerblue") {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      for (const edge of edgeList) {
-        ctx.beginPath();
-        const [start, ...rest] = edge.coords;
-        ctx.moveTo(start[0] * scale + offsetX, start[1] * scale + offsetY);
-        for (const pt of rest) {
-          ctx.lineTo(pt[0] * scale + offsetX, pt[1] * scale + offsetY);
-        }
-        ctx.stroke();
-      }
-    }
-
-    function takeRandomWalk(steps = 20) {
-      const junctions = city.junctions;
-      const edges = city.edges;
-
-      let current = junctions[Math.floor(Math.random() * junctions.length)];
-      const walked = [];
-      const visited = new Set();
-
-      for (let i = 0; i < steps; i++) {
-        const options = current.edge_ids.filter(eid => !visited.has(eid));
-        if (options.length === 0) break;
-        const eid = options[Math.floor(Math.random() * options.length)];
-        const edge = edges.find(e => e.id === eid);
-        walked.push(edge);
-        visited.add(eid);
-
-        const ends = edge.coords;
-        const nextCoord = ends.find(pt => pt[0] !== current.coords[0] || pt[1] !== current.coords[1]);
-        current = junctions.find(j => j.coords[0] === nextCoord[0] && j.coords[1] === nextCoord[1]);
-        if (!current) break;
-      }
-
-      return walked;
-    }
-
-    function takeMultipleWalks(count = 5) {
-      for (let i = 0; i < count; i++) {
-        const walk = takeRandomWalk(25);
-        const color = walkColors[i % walkColors.length];
-        drawWalk(walk, color);
-      }
-    }
-
-    fetch("bezier_city_web.json")
-      .then(res => res.json())
-      .then(data => {
-        city = data;
-        resizeCanvasAndFitCity();
-    });
-
-    walkBtn.addEventListener("click", () => {
-      drawCity();
-      drawWalk(takeRandomWalk(27));
-    });
-
-    multiBtn.addEventListener("click", () => {
-      takeMultipleWalks(39); // You can increase or make dynamic
-    });
-
-    function resizeCanvasAndFitCity() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-
-        if (!city) return;
-
-        // Fit city to canvas
-        const allX = city.edges.flatMap(e => e.coords.map(pt => pt[0]));
-        const allY = city.edges.flatMap(e => e.coords.map(pt => pt[1]));
-        const minX = Math.min(...allX);
-        const maxX = Math.max(...allX);
-        const minY = Math.min(...allY);
-        const maxY = Math.max(...allY);
-
-        const margin = 40;
-        const w = maxX - minX;
-        const h = maxY - minY;
-        scale = Math.min((canvas.width - margin) / w, (canvas.height - margin) / h);
-        offsetX = (canvas.width - w * scale) / 2 - minX * scale;
-        offsetY = (canvas.height - h * scale) / 2 - minY * scale;
-
-        drawCity();
-    }
-
-    // Call on load + resize
-    window.addEventListener("resize", resizeCanvasAndFitCity);
-
-
-  </script>
+  <script src="bezier_city_full.json"></script> <!-- Load your JSON here -->
+  <script src="viewer.js"></script>             <!-- Load your viewer logic -->
 </body>
 </html>
+
